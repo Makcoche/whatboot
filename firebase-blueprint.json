@@ -1,0 +1,45 @@
+{
+  "schemas": {
+    "users": {
+      "id": "string",
+      "name": "string",
+      "email": "string",
+      "role": "string",
+      "tenantId": "string",
+      "avatarUrl": "string",
+      "companyName": "string",
+      "createdAt": "timestamp"
+    },
+    "chats": {
+      "id": "string",
+      "title": "string",
+      "agentId": "string",
+      "userId": "string",
+      "tenantId": "string",
+      "updatedAt": "timestamp",
+      "messages": "array"
+    },
+    "leads": {
+      "id": "string",
+      "name": "string",
+      "company": "string",
+      "phone": "string",
+      "status": "string",
+      "tenantId": "string",
+      "createdAt": "timestamp"
+    },
+    "logs": {
+      "id": "string",
+      "type": "string",
+      "message": "string",
+      "timestamp": "string",
+      "tenantId": "string"
+    }
+  },
+  "rules": {
+    "users": "allow read, write: if true;",
+    "chats": "allow read, write: if true;",
+    "leads": "allow read, write: if true;",
+    "logs": "allow read, write: if true;"
+  }
+}

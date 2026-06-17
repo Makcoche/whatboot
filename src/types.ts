@@ -15,6 +15,7 @@ export interface Message {
   text: string;
   timestamp: string;
   agentId?: string;
+  isPrivate?: boolean;
 }
 
 export interface ChatSession {

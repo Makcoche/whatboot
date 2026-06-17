@@ -1,6 +1,6 @@
 {
-  "name": "WhatBot Sinergia AI",
-  "description": "Sistema de simulación multiagente de atención, ventas y CRM de WhatsApp para Sinergia Agencia Creativa.",
+  "name": "Sinergia IA Business OS",
+  "description": "Plataforma SaaS activa y multitenant de automatización de ventas, atención al cliente CRM e Inteligencia Artificial multi-agente conectable a WhatsApp Cloud API de Meta.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
