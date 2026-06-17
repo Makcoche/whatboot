@@ -3,11 +3,26 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
+import { initializeApp } from "firebase/app";
+import { getFirestore, doc, setDoc, getDoc } from "firebase/firestore";
 
 dotenv.config();
 
 const app = express();
 const PORT = 3000;
+
+// Initialize Firebase client in backend 
+const firebaseConfig = {
+  apiKey: "AIzaSyBQTmvtjlKL6covG5ekBP_D9AHNXsF5t70",
+  authDomain: "gen-lang-client-0263267605.firebaseapp.com",
+  projectId: "gen-lang-client-0263267605",
+  storageBucket: "gen-lang-client-0263267605.firebasestorage.app",
+  messagingSenderId: "792190266894",
+  appId: "1:792190266894:web:44ae5bd713f6c3f8a3565f"
+};
+
+const firebaseApp = initializeApp(firebaseConfig);
+const db = getFirestore(firebaseApp);
 
 // Initialize Gemini Client
 const apiKey = process.env.GEMINI_API_KEY;
@@ -302,13 +317,82 @@ Entrega ÚNICAMENTE una estructura JSON válida que encaje estrictamente con el 
               console.error("[WhatsApp Outbound Error] Failed to dispatch via Meta API:", sendErr);
             }
           } else {
-            console.warn("[Meta Cloud API Bypass] No Token or Phone ID stored. Message saved. Outbound skipped.");
+            console.log("[Meta Cloud API Bypass] No Token or Phone ID stored. Message saved. Outbound skipped.");
+          }
+
+          // 4. Synchronize real-time webhook conversations with Firestore chats
+          try {
+            const chatId = `${from}_tenant-1`;
+            const mappedMsgs = session.messages.map((m, idx) => ({
+              id: `webhook_${from}_${idx}`,
+              sender: m.role === "user" ? "user" : "bot",
+              text: m.text,
+              timestamp: m.timestamp instanceof Date ? m.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              ...(m.role !== "user" ? { agentId: detectedAgent.toLowerCase().replace(" ", "-") } : {})
+            }));
+
+            const dbSession = {
+              id: chatId,
+              clientName: session.customerName,
+              clientCompany: session.companyName,
+              phone: session.phone,
+              avatar: `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(session.customerName)}`,
+              lastMessage: responseText,
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              unreadCount: 0,
+              lead: {
+                customerName: session.customerName,
+                companyName: session.companyName,
+                consultedServices: session.consultedServices,
+                leadStatus: session.leadStatus,
+                needsSummary: session.needsSummary
+              },
+              messages: mappedMsgs,
+              activeAgentId: detectedAgent.toLowerCase().replace(" ", "-"),
+              tenantId: "tenant-1"
+            };
+
+            await setDoc(doc(db, "chats", chatId), dbSession);
+            console.log(`[WhatsApp Webhook Firestore Sync] Successfully synced chat ${chatId} in real-time.`);
+          } catch (dbErr: any) {
+            console.warn("[WhatsApp Webhook Firestore Sync Error] Failed to write incoming chat to DB:", dbErr.message);
           }
         }
       }
     }
   } catch (error: any) {
     console.error("[WhatsApp Webhook Core Error]:", error);
+  }
+});
+
+// Mock Stripe webhook endpoint for multi-tenant subscription enforcement
+app.post("/api/stripe-webhook", async (req, res) => {
+  try {
+    const { event, tenantId, status, plan } = req.body;
+    console.log(`[Stripe Webhook Event Received] type: ${event}, tenantId: ${tenantId}`);
+    
+    // Simulate updating the subscription/status on Firestore configurations if database available
+    if (tenantId) {
+      const docId = `status_${tenantId}`;
+      await setDoc(doc(db, "logs", `stripe_${Date.now()}`), {
+        id: `stripe_${Date.now()}`,
+        type: "warn",
+        message: `Stripe Webhook Event: '${event}' processado para el Tenant: ${tenantId}. Plan: ${plan || "Silver"}. Estado: ${status || "Inactivo"}`,
+        timestamp: new Date().toLocaleTimeString(),
+        tenantId
+      });
+    }
+
+    res.json({
+      success: true,
+      received: true,
+      event,
+      tenantId,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error: any) {
+    console.error("Error in Stripe Webhook:", error);
+    res.status(500).json({ error: "Falla al registrar evento de cobro de Stripe.", details: error.message });
   }
 });
 

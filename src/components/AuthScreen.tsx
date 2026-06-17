@@ -17,7 +17,7 @@ import {
 
 interface AuthScreenProps {
   onLoginSuccess: (user: AppUser) => void;
-  tenants: Array<{ id: string; name: string }>;
+  tenants: Array<{ id: string; name: string; plan?: string }>;
 }
 
 export default function AuthScreen({ onLoginSuccess, tenants }: AuthScreenProps) {
@@ -38,6 +38,9 @@ export default function AuthScreen({ onLoginSuccess, tenants }: AuthScreenProps)
   const [regTenantId, setRegTenantId] = useState("tenant-1");
   const [newCompanyName, setNewCompanyName] = useState("");
   const [isCreatingNewCompany, setIsCreatingNewCompany] = useState(false);
+
+  const selectedTenant = tenants.find(t => t.id === regTenantId);
+  const selectedTenantPlan = isCreatingNewCompany ? "Enterprise Premium" : (selectedTenant?.plan || "Enterprise Premium");
   const [registerSuccess, setRegisterSuccess] = useState(false);
 
   // Quick preset click handler
@@ -458,14 +461,19 @@ export default function AuthScreen({ onLoginSuccess, tenants }: AuthScreenProps)
                     </div>
                     {/* Live indicator of what modules they have */}
                     <div className="mt-2 text-[10px] text-slate-500 font-mono bg-[#0c0d16]/40 p-2 rounded-lg border border-slate-950">
-                      <span className="text-slate-400 font-bold uppercase block mb-1">Módulos que se activarán ({modulesList.filter(m => hasAccess(m.id, regRole)).length || 0}):</span>
+                      <span className="text-slate-400 font-bold uppercase block mb-1">
+                        Módulos que se activarán ({modulesList.filter(m => hasAccess(m.id, regRole, selectedTenantPlan)).length || 0}):
+                      </span>
                       <div className="flex flex-wrap gap-1.5">
-                        {modulesList.filter(m => hasAccess(m.id, regRole)).map(m => (
+                        {modulesList.filter(m => hasAccess(m.id, regRole, selectedTenantPlan)).map(m => (
                           <span key={m.id} className="bg-indigo-950/20 border border-indigo-900/30 text-indigo-400 text-[8.5px] px-1.5 py-0.2 rounded-full font-sans">
                             {m.label.substring(3)}
                           </span>
                         ))}
                       </div>
+                      <span className="text-purple-300 font-mono text-[9px] mt-1 block">
+                        ⚡ Membresía del Espacio: {selectedTenantPlan}
+                      </span>
                     </div>
                   </div>
 
@@ -502,11 +510,13 @@ export default function AuthScreen({ onLoginSuccess, tenants }: AuthScreenProps)
                         id="reg-tenant-select"
                         value={regTenantId}
                         onChange={(e) => setRegTenantId(e.target.value)}
-                        className="w-full bg-[#0c0d16] border border-slate-900 rounded-xl py-2.5 px-3.5 text-xs text-slate-300 font-semibold focus:outline-none focus:border-purple-500/60 cursor-pointer"
+                        className="w-full bg-[#0c0d16] border border-slate-900 rounded-xl py-2.5 px-3.5 text-xs text-slate-300 font-semibold focus:outline-none focus:border-purple-500/60 cursor-pointer text-slate-300"
                       >
-                        <option value="tenant-1" className="bg-slate-950">Sinergia S.A.S. (Tenant Primario)</option>
-                        <option value="tenant-2" className="bg-slate-950">Inmobiliaria El Sol (Broker Regional)</option>
-                        <option value="tenant-3" className="bg-slate-950">Clínica Dental Bogotá (Servicio Médico)</option>
+                        {tenants.map(t => (
+                          <option key={t.id} value={t.id} className="bg-slate-950 text-slate-300 font-medium">
+                            {t.name} — ({t.plan || "Enterprise Premium"})
+                          </option>
+                        ))}
                       </select>
                     )}
                   </div>

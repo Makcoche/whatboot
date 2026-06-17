@@ -35,6 +35,7 @@ import {
   signOut,
   auth
 } from "./lib/firebase";
+import { deleteDoc } from "firebase/firestore";
 
 // --- TIPOS DE USUARIOS Y NIVELES DE ACCESO COMERCIAL DE SINERGIA ---
 export type UserRole = "ROOT" | "SUPER_ADMIN" | "GERENTE_COMERCIAL" | "COORDINADOR_PROYECTO" | "EMPLEADO";
@@ -58,46 +59,30 @@ export const PRESET_USERS: AppUser[] = [
     tenantId: "tenant-1",
     avatarUrl: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=200&auto=format&fit=crop",
     companyName: "Sinergia S.A.S."
-  },
-  {
-    id: "user-admin",
-    name: "Dra. Elena Solano",
-    email: "admin@elsol.com",
-    role: "SUPER_ADMIN",
-    tenantId: "tenant-2",
-    avatarUrl: "https://images.unsplash.com/photo-1580489944761-15a19d654956?q=80&w=200&auto=format&fit=crop",
-    companyName: "Inmobiliaria El Sol"
-  },
-  {
-    id: "user-gerente",
-    name: "Carlos Pérez",
-    email: "ventas@dentalbogota.com",
-    role: "GERENTE_COMERCIAL",
-    tenantId: "tenant-3",
-    avatarUrl: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=200&auto=format&fit=crop",
-    companyName: "Clínica Dental Bogotá"
-  },
-  {
-    id: "user-coordinador",
-    name: "Diana Bernal",
-    email: "proyectos@sinergia.com",
-    role: "COORDINADOR_PROYECTO",
-    tenantId: "tenant-1",
-    avatarUrl: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?q=80&w=200&auto=format&fit=crop",
-    companyName: "Sinergia S.A.S."
-  },
-  {
-    id: "user-empleado",
-    name: "Luis Gómez",
-    email: "soporte@sinergia.com",
-    role: "EMPLEADO",
-    tenantId: "tenant-1",
-    avatarUrl: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?q=80&w=200&auto=format&fit=crop",
-    companyName: "Sinergia S.A.S."
   }
 ];
 
-export function hasAccess(tab: string, role: UserRole): boolean {
+export function hasAccess(tab: string, role: UserRole, plan?: string): boolean {
+  // 1. Root Command center is restricted to ROOT global administration
+  if (tab === "root" && role !== "ROOT") return false;
+
+  // 2. Filter modules based on Subscription Membership (Membresía)
+  if (plan) {
+    const p = plan.toLowerCase();
+    if (p.includes("bronze") || p.includes("starter") || p.includes("básico")) {
+      // Bronze Starter only includes basic lightweight modules
+      if (!["chats", "crm", "academy", "onboarding"].includes(tab)) {
+        return false;
+      }
+    } else if (p.includes("silver") || p.includes("business") || p.includes("plata")) {
+      // Silver Business includes core CRM, sales workflows, docs, academy and dashboard, but excludes heavy automation/copys/finance prediction
+      if (!["chats", "agents", "crm", "sales", "projects", "docs", "academy", "onboarding", "dashboard"].includes(tab)) {
+        return false;
+      }
+    }
+  }
+
+  // 3. Filter modules based on User Profile / Role (Perfil)
   if (role === "ROOT") return true; 
   if (role === "SUPER_ADMIN") {
     return tab !== "root";
@@ -236,6 +221,75 @@ export default function App() {
     return () => unsubscribe();
   }, [currentUser]);
 
+  // Sync Projects and Tasks collection
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const q = collection(db, "tenants", currentUser.tenantId, "projects");
+
+    const unsubscribe = onSnapshot(q, async (snapshot) => {
+      const dbProjects: any[] = [];
+      snapshot.forEach((docSnap) => {
+        dbProjects.push(docSnap.data());
+      });
+
+      if (dbProjects.length > 0) {
+        setProjectsList(dbProjects);
+      } else {
+        // Seed initial mock projects
+        const defaultProjects = [
+          { id: "proj-1", title: "Diseñar Cerebro de Enrutamiento Inbound", assignee: "Diego Dev", column: "doing", risk: "Bajo", delayProb: "5%" },
+          { id: "proj-2", title: "Instalar pasarela de pagos Wompi/Stripe", assignee: "Andrés Gomez", column: "todo", risk: "Medio", delayProb: "45%" },
+          { id: "proj-3", title: "Capacitación de agentes (Sinergia Academy)", assignee: "Marta Soporte", column: "done", risk: "Ninguno", delayProb: "0%" },
+        ];
+        console.log("[Projects Sync] Seeding initial tasks for tenant", currentUser.tenantId);
+        for (const p of defaultProjects) {
+          await setDoc(doc(db, "tenants", currentUser.tenantId, "projects", p.id), p);
+        }
+      }
+    }, (error) => {
+      console.error("Error sincronizando proyectos de Firestore:", error);
+    });
+
+    return () => unsubscribe();
+  }, [currentUser]);
+
+  // Sync Financial Ledger / Transactions collection
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const q = collection(db, "tenants", currentUser.tenantId, "finance");
+
+    const unsubscribe = onSnapshot(q, async (snapshot) => {
+      const dbTransactions: any[] = [];
+      snapshot.forEach((docSnap) => {
+        dbTransactions.push(docSnap.data());
+      });
+
+      if (dbTransactions.length > 0) {
+        // Sort descending by date/id
+        dbTransactions.sort((a, b) => b.id.localeCompare(a.id));
+        setFinancialTransactions(dbTransactions);
+      } else {
+        // Seed default transactions
+        const defaultTransactions = [
+          { id: "tx-1", type: "ingreso", concept: "Suscripción Sinergia Plan Business - Dental Bogotá", amount: 120, date: "2026-06-16" },
+          { id: "tx-2", type: "ingreso", concept: "Instalación Consultoría Onboarding - Soluciones Sol", amount: 350, date: "2026-06-15" },
+          { id: "tx-3", type: "gasto", concept: "Facturación API Meta Cloud (WhatsApp Outbound)", amount: 45, date: "2026-06-14" },
+          { id: "tx-4", type: "gasto", concept: "Infraestructura Cloud Run & Ollama Hosting", amount: 150, date: "2026-06-10" },
+        ];
+        console.log("[Finance Sync] Seeding initial contabilidad ledger for tenant", currentUser.tenantId);
+        for (const tx of defaultTransactions) {
+          await setDoc(doc(db, "tenants", currentUser.tenantId, "finance", tx.id), tx);
+        }
+      }
+    }, (error) => {
+      console.error("Error sincronizando contabilidad diaria de Firestore:", error);
+    });
+
+    return () => unsubscribe();
+  }, [currentUser]);
+
   const [activeSessionId, setActiveSessionId] = useState<string>(() => {
     return sessions[0]?.id || "juan-restaurante";
   });
@@ -250,36 +304,35 @@ export default function App() {
   const [regTenant, setRegTenant] = useState("tenant-1");
   const [regCompanyName, setRegCompanyName] = useState("");
   const [authError, setAuthError] = useState("");
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
   const [inputText, setInputText] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<"chats" | "agents" | "crm" | "automations" | "dashboard" | "integrations" | "onboarding" | "marketing" | "sales" | "projects" | "finance" | "docs" | "academy" | "root">("chats");
   const [editorMode, setEditorMode] = useState<"client" | "agent" | "note">("client");
 
-  // Redireccionar si cambia el rol y se pierde acceso al módulo actual o si se selecciona un tenant diferente
+  // Multi-tenant simulated workspaces configuration
+  const [selectedTenantId, setSelectedTenantId] = useState("tenant-1");
+  const [tenants, setTenants] = useState([
+    { id: "tenant-1", name: "Sinergia S.A.S.", domain: "sinergia.creative", plan: "Enterprise Premium", status: "Activo", phoneId: "125633480629471" }
+  ]);
+  const activeTenant = tenants.find(t => t.id === selectedTenantId) || tenants[0];
+
+  // Redireccionar si cambia el rol/membresía y se pierde acceso al módulo actual
   useEffect(() => {
     if (currentUser) {
       setSelectedTenantId(currentUser.tenantId);
-      if (!hasAccess(activeTab, currentUser.role)) {
+      if (!hasAccess(activeTab, currentUser.role, activeTenant?.plan)) {
         const allowedTabs: ("chats" | "agents" | "crm" | "automations" | "dashboard" | "integrations" | "onboarding" | "marketing" | "sales" | "projects" | "finance" | "docs" | "academy" | "root")[] = [
           "chats", "agents", "crm", "automations", "marketing", "sales", "projects", "finance", "docs", "academy", "dashboard", "root", "onboarding", "integrations"
         ];
-        const fallback = allowedTabs.find(tab => hasAccess(tab, currentUser.role));
+        const fallback = allowedTabs.find(tab => hasAccess(tab, currentUser.role, activeTenant?.plan));
         if (fallback) {
           setActiveTab(fallback);
         }
       }
     }
-  }, [currentUser]);
-
-  // Multi-tenant simulated workspaces configuration
-  const [selectedTenantId, setSelectedTenantId] = useState("tenant-1");
-  const tenants = [
-    { id: "tenant-1", name: "Sinergia S.A.S.", domain: "sinergia.creative", plan: "Enterprise Premium", status: "Activo", phoneId: "125633480629471" },
-    { id: "tenant-2", name: "Inmobiliaria El Sol", domain: "solyvida.cl", plan: "Silver Business", status: "Activo", phoneId: "192837492837482" },
-    { id: "tenant-3", name: "Clínica Dental Bogotá", domain: "bogotadent.co", plan: "Bronze Starter", status: "Inactivo / Pendiente Pago", phoneId: "918273847263847" },
-  ];
-  const activeTenant = tenants.find(t => t.id === selectedTenantId) || tenants[0];
+  }, [currentUser, activeTenant?.plan, activeTab]);
 
   // Visual automation builder simulated steps
   const [flows, setFlows] = useState([
@@ -431,9 +484,7 @@ export default function App() {
 
   // 7. Panel ROOT Configs
   const [rootTenants, setRootTenants] = useState([
-    { id: "tenant-1", name: "Sinergia S.A.S.", plan: "Enterprise Premium", status: "Activo", databaseUsage: "2.4 GB", activeUsers: 45, logsCount: 1540 },
-    { id: "tenant-2", name: "Inmobiliaria El Sol", plan: "Silver Business", status: "Activo", databaseUsage: "850 MB", activeUsers: 14, logsCount: 312 },
-    { id: "tenant-3", name: "Clínica Dental Bogotá", plan: "Bronze Starter", status: "Inactivo / Pendiente Pago", databaseUsage: "120 MB", activeUsers: 2, logsCount: 88 },
+    { id: "tenant-1", name: "Sinergia S.A.S.", plan: "Enterprise Premium", status: "Activo", databaseUsage: "2.4 GB", activeUsers: 45, logsCount: 1540 }
   ]);
 
   // System Logs State
@@ -1043,14 +1094,7 @@ export default function App() {
 
             <button
               type="button"
-              onClick={() => {
-                if (confirm("¿Estás seguro de que deseas cerrar sesión en Sinergia IA?")) {
-                  signOut(auth).catch(err => console.error("Error signing out from firebase auth:", err));
-                  setCurrentUser(null);
-                  localStorage.removeItem("sinergia_current_user_v1");
-                  addLog("warn", "SESIÓN: Se ha cerrado la sesión corporativa del sistema.");
-                }
-              }}
+              onClick={() => setShowLogoutConfirm(true)}
               className="px-3 py-1.5 text-xs text-red-450 hover:text-white bg-red-500/10 hover:bg-red-650 hover:bg-red-500/20 border border-red-500/20 hover:border-red-500/40 rounded-xl transition-all duration-200 flex items-center space-x-1.5 cursor-pointer hover:shadow-lg"
               title="Cerrar la sesión de Sinergia Business OS"
             >
@@ -1087,7 +1131,7 @@ export default function App() {
             <span className="text-[9px] bg-purple-500/10 text-purple-300 font-mono px-1.5 py-0.5 rounded border border-purple-500/20">
               {currentUser ? [
                 "chats", "agents", "crm", "automations", "marketing", "sales", "projects", "finance", "docs", "academy", "dashboard", "root", "onboarding", "integrations"
-              ].filter(id => hasAccess(id, currentUser.role)).length : 14} MÓDS.
+              ].filter(id => hasAccess(id, currentUser.role, activeTenant?.plan)).length : 14} MÓDS.
             </span>
           </div>
 
@@ -1108,7 +1152,7 @@ export default function App() {
               { id: "root", label: "👑 Panel ROOT Global", color: "text-red-400 hover:bg-[#ef4444]/5", icon: ShieldCheck, badge: "SaaS" },
               { id: "onboarding", label: "🔧 Enlace WhatsApp API", color: "text-teal-400 hover:bg-[#14b8a6]/5", icon: Globe },
               { id: "integrations", label: "⚙️ Prompts del Sistema", color: "text-slate-400 hover:bg-slate-500/5", icon: Settings }
-            ].filter(item => currentUser ? hasAccess(item.id, currentUser.role) : true).map(item => {
+            ].filter(item => currentUser ? hasAccess(item.id, currentUser.role, activeTenant?.plan) : true).map(item => {
               const IconComp = item.icon;
               const isActive = activeTab === item.id;
               return (
@@ -1140,71 +1184,6 @@ export default function App() {
               );
             })}
           </div>
-
-          {/* Widget Interactivo de Control / Simulación de Privilegios */}
-          {currentUser && (
-            <div className="bg-gradient-to-tr from-[#05060b] to-[#0a0c16] border border-[#161a2e]/60 rounded-xl p-3 shadow-inner text-left mx-0.5">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-[9px] uppercase font-extrabold text-[#7982a5] tracking-widest flex items-center">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse mr-1.5"></span>
-                  Seguridad Activa
-                </span>
-                <span className="text-[8.5px] font-mono text-purple-400 font-extrabold bg-purple-950/20 px-1 rounded uppercase">
-                  SIM SECURE
-                </span>
-              </div>
-              <div className="flex items-center space-x-2 pb-2 border-b border-slate-900/60">
-                <div className="h-2 w-2 rounded-full bg-indigo-505 bg-indigo-500"></div>
-                <div>
-                  <p className="text-[10px] text-slate-450 leading-none">Nivel de Acceso activo:</p>
-                  <p className={`text-xs font-extrabold mt-0.5 ${getRoleBadgeStyle(currentUser.role).class.split(" ")[1]}`}>
-                    {getRoleBadgeStyle(currentUser.role).label}
-                  </p>
-                </div>
-              </div>
-              
-              {/* Mini conmutador rápido de roles demo en 1 click */}
-              <div className="mt-2 text-left">
-                <label className="text-[8.5px] text-slate-500 font-bold block uppercase tracking-wide mb-1">
-                  Conmutar Nivel de Privilegios para Evaluación:
-                </label>
-                <div className="grid grid-cols-2 gap-1 pt-0.5">
-                  {[
-                    { r: "ROOT" as UserRole, l: "👑 ROOT" },
-                    { r: "SUPER_ADMIN" as UserRole, l: "🛡️ ADMIN" },
-                    { r: "GERENTE_COMERCIAL" as UserRole, l: "💼 COMERCIAL" },
-                    { r: "COORDINADOR_PROYECTO" as UserRole, l: "📅 PM" },
-                    { r: "EMPLEADO" as UserRole, l: "👤 SOPORTE" }
-                  ].map(opt => (
-                    <button
-                      key={opt.r}
-                      type="button"
-                      onClick={() => {
-                        const match = PRESET_USERS.find(u => u.role === opt.r);
-                        if (match) {
-                          setCurrentUser(match);
-                          localStorage.setItem("sinergia_current_user_v1", JSON.stringify(match));
-                          addLog("success", `SIM SEGURIDAD: Conmutado dinámicamente al nivel ${opt.r}. Privilegios actualizados.`);
-                        } else {
-                          const updated = { ...currentUser, role: opt.r };
-                          setCurrentUser(updated);
-                          localStorage.setItem("sinergia_current_user_v1", JSON.stringify(updated));
-                          addLog("success", `SIM SEGURIDAD: Rol de usuario establecido en ${opt.r}.`);
-                        }
-                      }}
-                      className={`py-1.5 px-1 text-[8.2px] font-extrabold tracking-tight rounded border transition-all cursor-pointer text-center ${
-                        currentUser.role === opt.r
-                          ? "bg-purple-500/10 text-purple-305 text-purple-300 border-purple-500/30 shadow-sm"
-                          : "bg-slate-950 text-slate-450 border-slate-900/60 hover:text-white hover:border-slate-800"
-                      }`}
-                    >
-                      {opt.l}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
 
           {activeTab === "chats" ? (
             <div className="space-y-4 flex flex-col flex-1">
@@ -1524,7 +1503,121 @@ export default function App() {
 
         </aside>
 
-        {(activeTab === "chats" || activeTab === "agents") ? (
+        {(activeTenant?.status !== "Activo" && activeTab !== "root") ? (
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.98 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="lg:col-span-9 p-8 xl:p-12 overflow-y-auto flex flex-col items-center justify-center space-y-8 bg-[#040509] text-center min-h-[calc(100vh-140px)] custom-scrollbar"
+          >
+            <div className="max-w-md w-full bg-[#0b0c15] border border-rose-950/40 p-6 md:p-8 rounded-2xl shadow-2xl relative overflow-hidden ring-1 ring-rose-500/10">
+              {/* Absolutes stripe accents */}
+              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-rose-500 via-rose-600 to-amber-500"></div>
+
+              {/* Locked Neon Icon */}
+              <div className="mx-auto h-16 w-16 bg-rose-500/10 border border-rose-500/20 rounded-full flex items-center justify-center animate-pulse shadow-[0_0_15px_rgba(239,68,68,0.15)]">
+                <Lock className="w-7 h-7 text-rose-500" />
+              </div>
+
+              <div className="mt-5 space-y-2">
+                <span className="text-[10px] font-bold text-rose-450 uppercase tracking-widest font-mono bg-rose-500/10 px-2.5 py-1 rounded inline-block text-rose-400">
+                  Membresía Suspendida por Mora
+                </span>
+                <h2 className="text-xl font-extrabold text-white tracking-tight font-display">
+                  Suscripción Sinergia Bloqueada
+                </h2>
+                <p className="text-[11.5px] text-slate-400 leading-relaxed font-sans mt-2">
+                  Stripe Billing ha detectado un cargo rechazado o una tarjeta de crédito expirada en la cuenta de <strong className="text-emerald-300 font-bold">{activeTenant?.name}</strong>. El acceso a los módulos avanzados ha sido suspendido de forma automática por la API de cobros.
+                </p>
+              </div>
+
+              {/* Active Modules Blocked list */}
+              <div className="mt-6 bg-[#06070a] p-4.5 rounded-xl border border-slate-905 text-left space-y-2.5">
+                <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider font-mono">Módulos avanzados restringidos:</h4>
+                <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-400">
+                  <div className="flex items-center space-x-1.5 opacity-60">
+                    <span className="text-rose-500">●</span>
+                    <span>CRM Kanban</span>
+                  </div>
+                  <div className="flex items-center space-x-1.5 opacity-60">
+                    <span className="text-rose-500">●</span>
+                    <span>Automatizaciones</span>
+                  </div>
+                  <div className="flex items-center space-x-1.5 opacity-60">
+                    <span className="text-rose-500">●</span>
+                    <span>Centro Financiero</span>
+                  </div>
+                  <div className="flex items-center space-x-1.5 opacity-60">
+                    <span className="text-rose-500">●</span>
+                    <span>Marketing & Inteligencia Artificial</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Simulated Stripe Checkout Form */}
+              <div className="mt-8 space-y-4">
+                <div className="p-4 bg-[#090b11] border border-slate-850 rounded-xl space-y-3 shrink-0 text-left">
+                  <h4 className="text-xs font-bold text-slate-300">Pasarela Stripe de Contingencia</h4>
+                  <div className="space-y-2 text-xs">
+                    <div>
+                      <label className="text-[9.5px] text-slate-500 font-mono block mb-1 uppercase">Titular de Tarjeta</label>
+                      <input 
+                        defaultValue={currentUser?.name || "Representante de Cuenta"}
+                        id="stripeName"
+                        type="text" 
+                        placeholder="Nombre completo" 
+                        className="w-full bg-slate-950 border border-slate-850 rounded-lg p-2 text-slate-200 text-xs focus:outline-none focus:border-purple-500/50"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[9.5px] text-slate-500 font-mono block mb-1 uppercase">Tarjeta de Crédito Simulada</label>
+                      <input 
+                        defaultValue="•••• •••• •••• 4242" 
+                        disabled 
+                        type="text" 
+                        className="w-full bg-slate-950/50 border border-slate-850/65 rounded-lg p-2 text-slate-500 text-xs cursor-not-allowed"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-col space-y-2">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      addLog("info", "Stripe: Procesando pasarela de pago simulada...");
+                      try {
+                        const stripePayload = {
+                          event: "customer.subscription.created",
+                          tenantId: activeTenant.id,
+                          status: "Activo",
+                          plan: activeTenant.plan
+                        };
+                        const res = await fetch("/api/stripe-webhook", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify(stripePayload)
+                        });
+                        const data = await res.json();
+                        if (data.success) {
+                          // Update locally to open active view reactively
+                          setTenants(prev => prev.map(t => t.id === activeTenant.id ? { ...t, status: "Activo" } : t));
+                          setRootTenants(prev => prev.map(t => t.id === activeTenant.id ? { ...t, status: "Activo" } : t));
+                          addLog("success", "💳 Stripe: ¡Pago aprobado e integrado con éxito! Suscripción rehabilitada en Sinergia IA.");
+                        }
+                      } catch (err: any) {
+                        addLog("warn", "⚠️ Error procesando pago simulado de Stripe.");
+                      }
+                    }}
+                    className="w-full py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-extrabold rounded-lg shadow-lg hover:shadow-emerald-950/20 text-xs transition-all duration-200 cursor-pointer"
+                  >
+                    Simular Pago y Rehabilitar Módulos
+                  </button>
+                  <span className="text-[9.5px] text-slate-500 block">Este módulo interactúa directamente con el webhook de `/api/stripe-webhook`.</span>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        ) : (activeTab === "chats" || activeTab === "agents") ? (
           <>
             {/* COLUMNA CENTRAL: Consola Operativa de WhatsApp (lg:col-span-5) */}
             <section className="lg:col-span-5 border-r border-slate-900/60 flex flex-col bg-slate-950/60 min-h-[600px] xl:min-h-0 relative">
@@ -3449,7 +3542,12 @@ export default function App() {
                             risk: rates[rndIdx],
                             delayProb: probs[rndIdx]
                           };
-                          setProjectsList([...projectsList, tItem]);
+                          if (currentUser) {
+                            setDoc(doc(db, "tenants", currentUser.tenantId, "projects", tItem.id), tItem)
+                              .catch(err => console.error("Error creating project in Firestore:", err));
+                          } else {
+                            setProjectsList([...projectsList, tItem]);
+                          }
                           addLog("success", `🎯 Tarea registrada en el Scrum: '${titleEl.value}' asignada a ${assigneeEl.value}`);
                           titleEl.value = "";
                         }}
@@ -3574,7 +3672,12 @@ export default function App() {
                       amount: amountVal,
                       date: new Date().toISOString().split('T')[0]
                     };
-                    setFinancialTransactions([newTx, ...financialTransactions]);
+                    if (currentUser) {
+                      setDoc(doc(db, "tenants", currentUser.tenantId, "finance", newTx.id), newTx)
+                        .catch(err => console.error("Error creating transaction in Firestore:", err));
+                    } else {
+                      setFinancialTransactions([newTx, ...financialTransactions]);
+                    }
                     setNewTxConcept("");
                     setNewTxAmount("");
                     addLog("success", `💵 Registro Financiero: ${newTxType === 'ingreso' ? 'Ingreso' : 'Egreso'} de $${amountVal} USD por '${newTxConcept}' incorporado.`);
@@ -3654,7 +3757,12 @@ export default function App() {
                           <button
                             type="button"
                             onClick={() => {
-                              setFinancialTransactions(financialTransactions.filter(t => t.id !== tx.id));
+                              if (currentUser) {
+                                deleteDoc(doc(db, "tenants", currentUser.tenantId, "finance", tx.id))
+                                  .catch(err => console.error("Error deleting transaction in Firestore:", err));
+                              } else {
+                                setFinancialTransactions(financialTransactions.filter(t => t.id !== tx.id));
+                              }
                               addLog("warn", `🗑️ Eliminado asiento financiero: ${tx.concept}`);
                             }}
                             className="text-slate-500 hover:text-red-400 p-1 rounded transition-colors cursor-pointer"
@@ -4042,7 +4150,24 @@ export default function App() {
                     {rootTenants.map(tenant => (
                       <tr key={tenant.id} className="hover:bg-slate-900/10 transition-colors">
                         <td className="py-3.2 px-3 font-bold font-sans text-white">{tenant.name}</td>
-                        <td className="py-3.2 px-3 text-purple-300">{tenant.plan}</td>
+                        <td className="py-1.5 px-3">
+                          <select
+                            value={tenant.plan}
+                            onChange={(e) => {
+                              const newPlan = e.target.value;
+                              // Update rootTenants
+                              setRootTenants(rootTenants.map(t => t.id === tenant.id ? { ...t, plan: newPlan } : t));
+                              // Update parent tenants list (which drives the active membership modules mapping)
+                              setTenants(prevTenants => prevTenants.map(t => t.id === tenant.id ? { ...t, plan: newPlan } : t));
+                              addLog("success", `ROOT: Membresía de '${tenant.name}' cambiada con éxito a '${newPlan}'.`);
+                            }}
+                            className="bg-slate-900 border border-slate-800 rounded-lg py-1 px-2.5 text-xs text-purple-300 font-semibold focus:outline-none focus:border-purple-500/60 cursor-pointer hover:bg-slate-850 transition-colors"
+                          >
+                            <option value="Enterprise Premium">Enterprise Premium</option>
+                            <option value="Silver Business">Silver Business</option>
+                            <option value="Bronze Starter">Bronze Starter</option>
+                          </select>
+                        </td>
                         <td className="py-3.2 px-3 text-right">{tenant.activeUsers} operarios</td>
                         <td className="py-3.2 px-3 text-right">{tenant.databaseUsage}</td>
                         <td className="py-3.2 px-3 text-center">
@@ -4059,6 +4184,8 @@ export default function App() {
                               setRootTenants(rootTenants.map(t => {
                                 if (t.id === tenant.id) {
                                   const nStatus = t.status === "Activo" ? "Inactivo / Suspendido" : "Activo";
+                                  // Sync active status too
+                                  setTenants(prevTenants => prevTenants.map(pt => pt.id === tenant.id ? { ...pt, status: nStatus } : pt));
                                   addLog("warn", `ROOT: Estatus de la cuenta '${tenant.name}' cambiado a '${nStatus}'.`);
                                   return { ...t, status: nStatus };
                                 }
@@ -4564,6 +4691,42 @@ export default function App() {
             </div>
 
           </motion.div>
+        )}
+
+        {showLogoutConfirm && (
+          <div className="fixed inset-0 z-[999] bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+            <div className="bg-[#0b0c15] border border-slate-800 p-6 rounded-2xl max-w-sm w-full shadow-2xl space-y-4 text-center ring-1 ring-purple-500/10 animate-fade-in">
+              <div className="mx-auto h-12 w-12 bg-red-500/10 border border-red-500/20 rounded-full flex items-center justify-center text-red-100">
+                <LogOut className="w-5 h-5 text-red-500" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-sm font-semibold text-white">¿Estás seguro de que deseas cerrar sesión?</h3>
+                <p className="text-[11px] text-slate-400">Se cerrará tu sesión activa en Sinergia Business OS y volverás a la pantalla de ingreso.</p>
+              </div>
+              <div className="grid grid-cols-2 gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowLogoutConfirm(false)}
+                  className="w-full py-2 bg-slate-900 hover:bg-slate-850 text-slate-350 text-xs font-semibold rounded-lg border border-slate-800 hover:text-white transition-all cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowLogoutConfirm(false);
+                    signOut(auth).catch(err => console.error("Error signing out from firebase auth:", err));
+                    setCurrentUser(null);
+                    localStorage.removeItem("sinergia_current_user_v1");
+                    addLog("warn", "SESIÓN: Se ha cerrado la sesión corporativa del sistema.");
+                  }}
+                  className="w-full py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold rounded-lg shadow-lg hover:shadow-rose-950/20 transition-all cursor-pointer"
+                >
+                  Sí, Cerrar Sesión
+                </button>
+              </div>
+            </div>
+          </div>
         )}
 
       </div>

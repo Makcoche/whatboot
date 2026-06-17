@@ -19,13 +19,31 @@
       "updatedAt": "timestamp",
       "messages": "array"
     },
-    "leads": {
+    "crm": {
       "id": "string",
-      "name": "string",
-      "company": "string",
+      "customerName": "string",
+      "companyName": "string",
       "phone": "string",
-      "status": "string",
-      "tenantId": "string",
+      "leadStatus": "string",
+      "needsSummary": "string",
+      "consultedServices": "array",
+      "createdAt": "timestamp"
+    },
+    "projects": {
+      "id": "string",
+      "title": "string",
+      "assignee": "string",
+      "column": "string",
+      "risk": "string",
+      "delayProb": "string",
+      "createdAt": "timestamp"
+    },
+    "finance": {
+      "id": "string",
+      "type": "string",
+      "concept": "string",
+      "amount": "number",
+      "date": "string",
       "createdAt": "timestamp"
     },
     "logs": {
@@ -39,7 +57,9 @@
   "rules": {
     "users": "allow read, write: if true;",
     "chats": "allow read, write: if true;",
-    "leads": "allow read, write: if true;",
+    "crm": "allow read, write: if true;",
+    "projects": "allow read, write: if true;",
+    "finance": "allow read, write: if true;",
     "logs": "allow read, write: if true;"
   }
 }
