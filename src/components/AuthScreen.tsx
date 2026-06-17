@@ -24,8 +24,8 @@ export default function AuthScreen({ onLoginSuccess, tenants }: AuthScreenProps)
   const [activeTab, setActiveTab] = useState<"login" | "register">("login");
   
   // Login State
-  const [loginEmail, setLoginEmail] = useState("");
-  const [loginPassword, setLoginPassword] = useState("");
+  const [loginEmail, setLoginEmail] = useState("josegregoriourdanetaguadama@gmail.com");
+  const [loginPassword, setLoginPassword] = useState("password123");
   const [showPassword, setShowPassword] = useState(false);
   const [loginError, setLoginError] = useState("");
   const [isLoadingAuth, setIsLoadingAuth] = useState(false);

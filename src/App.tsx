@@ -52,8 +52,8 @@ export interface AppUser {
 export const PRESET_USERS: AppUser[] = [
   {
     id: "user-root",
-    name: "Ing. José Urdaneta",
-    email: "root@sinergia.com",
+    name: "Ing. José Gregorio Urdaneta",
+    email: "josegregoriourdanetaguadama@gmail.com",
     role: "ROOT",
     tenantId: "tenant-1",
     avatarUrl: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=200&auto=format&fit=crop",
